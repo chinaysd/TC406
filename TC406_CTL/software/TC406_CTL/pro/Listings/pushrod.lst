@@ -1,0 +1,210 @@
+C51 COMPILER V9.00   PUSHROD                                                               05/24/2018 15:04:23 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE PUSHROD
+OBJECT MODULE PLACED IN .\Objects\pushrod.obj
+COMPILER INVOKED BY: D:\keil\C51\BIN\C51.EXE ..\bsp\pushrod\pushrod.c BROWSE INCDIR(..\pro;..\app;..\bsp;..\lib\inc;..\b
+                    -sp\pushrod;..\bsp\message;..\bsp\sw_i2c) DEBUG OBJECTEXTEND PRINT(.\Listings\pushrod.lst) OBJECT(.\Objects\pushrod.obj)
+
+line level    source
+
+   1          #include "pushrod.h"
+   2          #include "timeout.h"
+   3          #include "sys_config.h"
+   4          
+   5          XDATA TIMEOUT_PARA Pushrod_Timer[PUSHROD_NUM];
+   6          
+   7          INT8U Pushrod_Init(Push_Para_t *para){
+   8   1              extern  INT8U Pushrod_PortInit(INT8U id);
+   9   1      
+  10   1              return Pushrod_PortInit(para->id);
+  11   1      }
+  12          
+  13          static INT8U Pushrod_Set(INT8U id,Push_Status_t sta){
+  14   1              extern INT8U Pushrod_PortSet(INT8U id,INT8U sta);
+  15   1      
+  16   1              return Pushrod_PortSet(id,sta);
+  17   1      }
+  18          
+  19          static INT8U Pushrod_Open(Push_Para_t *para){
+  20   1              if(para->id> PUSHROD_NUM)
+  21   1                      return 0;
+  22   1              para->Sta = PUSH_OPEN;
+  23   1              
+  24   1              #ifdef PUSHROD_GET_RUNNING_STATUS
+  25   1                      para->IsRun = True;
+  26   1              #endif
+  27   1              
+  28   1              return Pushrod_Set(para->id, PUSH_OPEN);
+  29   1      }
+  30          
+  31          static INT8U Pushrod_Close(Push_Para_t *para){
+  32   1              if(para->id > PUSHROD_NUM)
+  33   1                      return 0;
+  34   1              para->Sta = PUSH_CLOSE;
+  35   1              
+  36   1              #ifdef PUSHROD_GET_RUNNING_STATUS
+  37   1                      para->IsRun = True;
+  38   1              #endif
+  39   1              
+  40   1              return Pushrod_Set(para->id, PUSH_CLOSE);
+  41   1      }
+  42          
+  43          static INT8U Pushrod_Stop(Push_Para_t *para){
+  44   1              if(para->id > PUSHROD_NUM)
+  45   1                      return 0;
+  46   1              para->Sta = PUSH_STOP;
+  47   1              
+  48   1              #ifdef PUSHROD_GET_RUNNING_STATUS
+  49   1                      para->IsRun = False;
+  50   1              #endif
+  51   1              
+  52   1              return Pushrod_Set(para->id, PUSH_STOP);
+  53   1      }
+  54          
+C51 COMPILER V9.00   PUSHROD                                                               05/24/2018 15:04:23 PAGE 2   
+
+  55          void Pushrod_Handle(const Push_Para_t *para){
+  56   1      #ifdef PUSHROD_REVERSING_DELAY  
+                      Push_Status_t cur_sta = para->Sta;
+                      static INT8U flag[PUSHROD_NUM] = {0};
+                      
+                      #ifdef PUSHROD_REVERSE_SWITCH
+                      if(para->Sta!= cur_sta && !para->ReverseFlag){
+                      #else
+                      if(para->Sta!= cur_sta){
+                      #endif
+                      
+                              if(!flag[para->id]){
+                                      flag[para->id] = True;
+                                      TimeOut_Record(&Pushrod_Timer[para->id], PUSH_SWITCH_DELAY_VALUE);
+                                      Pushrod_Stop(para);
+                              }
+                      }else{
+                              flag[para->id] = True;
+                              
+                              if(cur_sta== PUSH_STOP){
+                                      Pushrod_Stop(para);
+                              }else if(cur_sta == PUSH_OPEN){
+                                      #ifdef PUSHROD_REVERSE_SWITCH
+                                      if(para->ReverseFlag){
+                                              Pushrod_Close(para);
+                                      }else{
+                                              Pushrod_Open(para);
+                                      }
+                                      #else
+                                      Pushrod_Open(p);
+                                      #endif
+                              }else if(cur_sta == PUSH_CLOSE){
+                                      #ifdef PUSHROD_REVERSE_SWITCH
+                                      if(para->ReverseFlag){
+                                              Pushrod_Open(para);
+                                      }else{
+                                              Pushrod_Close(para);
+                                      }
+                                      #else
+                                      Pushrod_Close(para);
+                                      #endif
+                              }
+                      }
+                      
+                      if(TimeOutDet_Check(&Pushrod_Timer[para->id])){
+                              flag[para->id] = False;
+                              
+                              if(cur_sta== PUSH_STOP){
+                                      Pushrod_Stop(para);
+                              }else if(cur_sta == PUSH_OPEN){
+                                      #ifdef PUSHROD_REVERSE_SWITCH
+                                      if(para->ReverseFlag){
+                                              Pushrod_Close(para);
+                                      }else{
+                                              Pushrod_Open(para);
+                                      }
+                                      #else
+                                      Pushrod_Open(para);
+                                      #endif
+                              }else if(cur_sta == PUSH_CLOSE){
+                                      #ifdef PUSHROD_REVERSE_SWITCH
+                                      if(para->ReverseFlag){
+C51 COMPILER V9.00   PUSHROD                                                               05/24/2018 15:04:23 PAGE 3   
+
+                                              Pushrod_Open(para);
+                                      }else{
+                                              Pushrod_Close(para);
+                                      }
+                                      #else
+                                      Pushrod_Close(para);
+                                      #endif
+                              }       
+                      }
+              }
+              #else
+ 128   1              if(!para)
+ 129   1                      return ;
+ 130   1              
+ 131   1              if(para->Sta == PUSH_STOP){
+ 132   2                      Pushrod_Stop(para);
+ 133   2              }else if(para->Sta == PUSH_OPEN){
+ 134   2                      #ifdef PUSHROD_REVERSE_SWITCH
+                                      if(para->ReverseFlag){
+                                              Pushrod_Close(para);
+                                      }else{
+                                              Pushrod_Open(para);
+                                      }
+                              #else
+ 141   2                              Pushrod_Open(para);
+ 142   2                      #endif
+ 143   2              }else if(para->Sta == PUSH_CLOSE){
+ 144   2                      #ifdef PUSHROD_REVERSE_SWITCH
+                                      if(para->ReverseFlag){
+                                              Pushrod_Open(para);
+                                      }else{
+                                              Pushrod_Close(para);
+                                      }
+                              #else
+ 151   2                              Pushrod_Close(para);
+ 152   2                      #endif
+ 153   2              }else{
+ 154   2                      return;
+ 155   2              }
+ 156   1      }
+ 157          #endif
+ 158          
+ 159          void Pushrod_SetSta(Push_Para_t *para,Push_Status_t sta){
+ 160   1              if(!para)
+ 161   1                      return;
+ 162   1              para->Sta = sta;
+ 163   1      }
+ 164          
+ 165          #ifdef PUSHROD_REVERSE_SWITCH
+              void Pushrod_SetReverseFlag(Push_Para_t *para,INT8U flag){
+                      if(!para)
+                              return ;
+                      para->ReverseFlag = flag;
+              }
+              #endif
+ 172          
+ 173          #ifdef PUSHROD_GET_RUNNING_STATUS
+ 174          INT8U Pushrod_GetRunFlag(Push_Para_t *para){
+ 175   1              if(!para)
+ 176   1                      return 0;
+ 177   1              return para->IsRun;
+ 178   1      }
+C51 COMPILER V9.00   PUSHROD                                                               05/24/2018 15:04:23 PAGE 4   
+
+ 179          #endif
+*** WARNING C316 IN LINE 179 OF ..\bsp\pushrod\pushrod.c: unterminated conditionals
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    211    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     48    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----       3
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  1 WARNING(S),  0 ERROR(S)

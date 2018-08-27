@@ -1,0 +1,696 @@
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE APP
+OBJECT MODULE PLACED IN .\Objects\app.obj
+COMPILER INVOKED BY: D:\keil\C51\BIN\C51.EXE ..\app\app.c BROWSE INCDIR(..\pro;..\app;..\bsp;..\lib\inc;..\bsp\pushrod;.
+                    -.\bsp\message;..\bsp\sw_i2c) DEBUG OBJECTEXTEND PRINT(.\Listings\app.lst) OBJECT(.\Objects\app.obj)
+
+line level    source
+
+   1          #include "app.h"
+   2          #include "msge.h"
+   3          #include "bsp_timer.h"
+   4          #include "timeout.h"
+   5          #include "sys_config.h"
+   6          #include <string.h>
+   7          
+   8          
+   9          XDATA App_Para_t App_Para;
+  10          XDATA Push_Para_t Push_Para[PUSHROD_NUM];
+  11          XDATA Msge_Para_t Msge_Para[MSGE_NUM];
+  12          extern  Bsp_Tx_t Tx_Buf[UART_NUM];
+  13          TIMEOUT_PARA Poll_SentTime; 
+  14          
+  15          INT8U i;
+  16          unsigned char PUSH1_SWITCH_FLAG;
+  17          unsigned int  PUSH1_SWITCH_CNT;
+  18          unsigned char PUSH1_SWITCH_CNT_FLAG;
+  19          unsigned char PUSH2_SWITCH_FLAG;
+  20          unsigned int  PUSH2_SWITCH_CNT;
+  21          TIMEOUT_PARA Shake_Time[2];
+  22          
+  23          
+  24          #define APP_CLR_SYS_CLS()                       (App_Para.system_auto_clscnt = 0)
+  25          
+  26          void App_SetLed(INT8U id,INT16U set){
+  27   1              App_Para.led_sta[id] |= set & 0xffff;
+  28   1      }
+  29          
+  30          void App_ClrLed(INT8U id,INT16U clr){
+  31   1              App_Para.led_sta[id] &= ~(clr & 0xffff);
+  32   1      }
+  33          
+  34          void App_FootLedSet(INT8U id,INT8U set){
+  35   1              if(id == 0){
+  36   2                      FOOT1_LED = set;
+  37   2              }else if(id == 1){
+  38   2                      FOOT2_LED = set;
+  39   2              }
+  40   1      }
+  41          
+  42          void App_HeatSet(INT8U id,INT8U set){
+  43   1              if(id == 0){
+  44   2                      HEAT1_PIN = set;
+  45   2              }else if(id == 1){
+  46   2                      HEAT2_PIN = set;
+  47   2              }
+  48   1      }
+  49          
+  50          void App_Init(void){
+  51   1              for(i = 0;i < PUSHROD_NUM;i++){
+  52   2                      Push_Para[i].id = i;
+  53   2                      Push_Para[i].IsRun = False;
+  54   2                      Push_Para[i].Sta = PUSH_STOP;
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 2   
+
+  55   2                      Pushrod_Init(&Push_Para[i]);
+  56   2              }
+  57   1              
+  58   1              for(i = 0; i < MSGE_NUM;i ++){
+  59   2                      Msge_Para[i].id = i;
+  60   2                      Msge_Para[i].intensity = 7;
+  61   2                      Msge_Para[i].mode = AUTO_CTR;
+  62   2                      Msge_Para[i].sw_sta = False;
+  63   2                      Msge_Init(&Msge_Para[i]);
+  64   2              }
+  65   1      
+  66   1              for(i = 0;i < UART_NUM;i ++){
+  67   2                      Bsp_UartInit(i);
+  68   2              }
+  69   1              
+  70   1              /*led*/
+  71   1              SET_REG_CON(1,0);
+  72   1              SET_REG_CON(1,4);
+  73   1              /*heat*/
+  74   1              SET_REG_CON(4,1);
+  75   1              SET_REG_CON(4,2);
+  76   1              
+  77   1              App_FootLedSet(FOOT_ID0,OFF);
+  78   1              App_FootLedSet(FOOT_ID1,OFF);
+  79   1      
+  80   1              App_HeatSet(HEAT_ID0, OFF);     
+  81   1              App_HeatSet(HEAT_ID1, OFF);
+  82   1      
+  83   1              TimeOutDet_Init();
+  84   1      
+  85   1              Bsp_Timer0Init();
+  86   1              memset(&App_Para,0,sizeof(App_Para_t));
+  87   1              EA = 1;
+  88   1      }
+  89          
+  90          static int App_SentMsg(INT8U id,unsigned int cont){    
+  91   1              memset((void*)&App_Para.send_buf[0],0,BSP_UART_SIZE);
+  92   1              App_Para.send_buf[0] = START_FIELD;
+  93   1              App_Para.send_buf[1] = MSG_ID;
+  94   1              App_Para.send_buf[2] = Get_High(cont);
+  95   1              App_Para.send_buf[3] = Get_Low(cont);
+  96   1              App_Para.send_buf[4] = (INT8U)(App_Para.send_buf[0] +App_Para.send_buf[1]+App_Para.send_buf[2]+App_Para.s
+             -end_buf[3]);
+  97   1              App_Para.send_buf[5] = Get_High(STOP_MESSAGE);
+  98   1              App_Para.send_buf[6] = Get_Low(STOP_MESSAGE);
+  99   1              Bsp_UartSendBuf(id,&App_Para.send_buf[0],BSP_UART_SIZE);
+ 100   1              return 0; 
+ 101   1      } 
+ 102          
+ 103          /**
+ 104                  @brief:按键功能
+ 105          */
+ 106          void App_HeatHandle(INT8U id){
+ 107   1              if(App_Para.warn_sta[id]){
+ 108   2                      App_Para.warn_sta[id] = OFF;
+ 109   2                      App_HeatSet(id, OFF);
+ 110   2                      App_ClrLed(id, LED8_VALUE);
+ 111   2                      App_Para.warn_auto_clsflag[id] = False;
+ 112   2                      App_Para.warn_auto_clscnt[id] = 0;
+ 113   2              }else{
+ 114   2                      App_Para.warn_sta[id] = ON;
+ 115   2                      App_HeatSet(id, ON);
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 3   
+
+ 116   2                      App_SetLed(id, LED8_VALUE);
+ 117   2                      App_Para.warn_auto_clsflag[id] = True;
+ 118   2                      App_Para.warn_auto_clscnt[id] = 0;
+ 119   2              }
+ 120   1      }
+ 121          
+ 122          void App_MsgeHandle(INT8U id){
+ 123   1              if(App_Para.msge_sta[id]){
+ 124   2                      App_Para.msge_sta[id] = OFF;            
+ 125   2                      Msge_Close(&Msge_Para[id]);
+ 126   2                      App_ClrLed(id, LED9_VALUE);
+ 127   2                      App_Para.msge_auto_clsflag[id] = False;
+ 128   2                      App_Para.msge_auto_clscnt[id] = 0;
+ 129   2              }else{
+ 130   2                      App_Para.msge_sta[id] = ON;
+ 131   2                      Msge_Open(&Msge_Para[id], AUTO_CTR);
+ 132   2                      App_SetLed(id, LED9_VALUE);
+ 133   2                      App_Para.msge_auto_clsflag[id] = True;
+ 134   2                      App_Para.msge_auto_clscnt[id] = 0;
+ 135   2              }
+ 136   1      }
+ 137          
+ 138          void App_LedHandle(INT8U id){
+ 139   1              if(App_Para.foot_ledsta[id]){
+ 140   2                      App_Para.foot_ledsta[id] = OFF;
+ 141   2                      App_FootLedSet(id, OFF);
+ 142   2                      App_ClrLed(id, LED10_VALUE);
+ 143   2              }else{
+ 144   2                      App_Para.foot_ledsta[id] = ON;
+ 145   2                      App_FootLedSet(id, ON);
+ 146   2                      App_SetLed(id, LED10_VALUE);
+ 147   2              }
+ 148   1      }
+ 149          
+ 150          void App_PushAOpenHandle(void){
+ 151   1              Pushrod_SetSta(&Push_Para[PUSHROD_A], PUSH_OPEN);
+ 152   1      }
+ 153          
+ 154          void App_PushBOpenHandle(void){
+ 155   1              Pushrod_SetSta(&Push_Para[PUSHROD_B], PUSH_OPEN);
+ 156   1      }
+ 157          
+ 158          void App_PushCOpenHandle(void){
+ 159   1              Pushrod_SetSta(&Push_Para[PUSHROD_C], PUSH_OPEN);
+ 160   1      }
+ 161          
+ 162          void App_PushDOpenHandle(void){
+ 163   1              Pushrod_SetSta(&Push_Para[PUSHROD_D], PUSH_OPEN);
+ 164   1      }
+ 165          
+ 166          void App_PushEOpenHandle(void){
+ 167   1              Pushrod_SetSta(&Push_Para[PUSHROD_E], PUSH_OPEN);
+ 168   1      }
+ 169          
+ 170          void App_PushFOpenHandle(void){
+ 171   1              Pushrod_SetSta(&Push_Para[PUSHROD_F], PUSH_OPEN);
+ 172   1      }
+ 173          
+ 174          void App_PushACloseHandle(void){
+ 175   1              Pushrod_SetSta(&Push_Para[PUSHROD_A], PUSH_CLOSE);
+ 176   1      }
+ 177          
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 4   
+
+ 178          void App_PushBCloseHandle(void){
+ 179   1              Pushrod_SetSta(&Push_Para[PUSHROD_B], PUSH_CLOSE);
+ 180   1      }
+ 181          
+ 182          void App_PushCCloseHandle(void){
+ 183   1              Pushrod_SetSta(&Push_Para[PUSHROD_C], PUSH_CLOSE);
+ 184   1      }
+ 185          
+ 186          void App_PushDCloseHandle(void){
+ 187   1              Pushrod_SetSta(&Push_Para[PUSHROD_D], PUSH_CLOSE);
+ 188   1      }
+ 189          
+ 190          void App_PushECloseHandle(void){
+ 191   1              Pushrod_SetSta(&Push_Para[PUSHROD_E], PUSH_CLOSE);
+ 192   1      }
+ 193          
+ 194          void App_PushFCloseHandle(void){
+ 195   1              Pushrod_SetSta(&Push_Para[PUSHROD_F], PUSH_CLOSE);
+ 196   1      }
+ 197          
+ 198          /**
+ 199                  @brief:按键处理入口
+ 200          */
+ 201          void Key1_Handle(INT8U id){
+ 202   1              if(id == BSP_UART0_ID){
+ 203   2                      App_PushAOpenHandle();
+ 204   2                      App_SetLed(BSP_UART0_ID,LED1_VALUE);
+ 205   2              }else{
+ 206   2                      App_PushDOpenHandle();
+ 207   2                      App_SetLed(BSP_UART1_ID,LED1_VALUE);
+ 208   2              }
+ 209   1      }
+ 210          
+ 211          void Key2_Handle(INT8U id){
+ 212   1              if(id == BSP_UART0_ID){
+ 213   2                      App_PushACloseHandle();
+ 214   2                      App_SetLed(BSP_UART0_ID,LED2_VALUE);
+ 215   2              }else{
+ 216   2                      App_PushDCloseHandle();
+ 217   2                      App_SetLed(BSP_UART1_ID,LED2_VALUE);
+ 218   2              }
+ 219   1      }
+ 220          
+ 221          /**
+ 222                  @brief:按下复位
+ 223          */
+ 224          void delay_ms(unsigned int time)
+ 225          {
+ 226   1          unsigned int i,j;
+ 227   1              for(i=time;i>0;i--)
+ 228   1              {
+ 229   2                 for(j=120;j>0;j--);
+ 230   2              }
+ 231   1      }
+ 232          void Key3_Handle(INT8U id){
+ 233   1              App_Para.reset_sta[id] = True;
+ 234   1              if(id == BSP_UART0_ID){                 
+ 235   2                      App_PushAOpenHandle();
+ 236   2                      #if 0
+                              //FOOT1_LED = 1;
+                              delay_ms(5000);
+                                      //PUSH1_SWITCH_FLAG = 1;
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 5   
+
+                                      //FOOT1_LED = 1;
+                                      //if(PUSH1_SWITCH_CNT_FLAG)
+                                      //{
+                                         //FOOT2_LED = 1;
+                                         //PUSH1_SWITCH_CNT = 0;
+                                         //PUSH1_SWITCH_CNT_FLAG = 0;
+                                         //PUSH1_SWITCH_FLAG = 0;
+                                         App_PushBOpenHandle();
+                                         //App_PushCOpenHandle();
+                                      //}
+                               #endif
+ 251   2                      App_PushBOpenHandle();
+ 252   2                      App_PushCOpenHandle();
+ 253   2                      App_SetLed(BSP_UART0_ID, LED3_VALUE);
+ 254   2              }else{
+ 255   2                      App_PushDOpenHandle();
+ 256   2                      #if 0
+                              PUSH2_SWITCH_FLAG = 1; 
+                              if(PUSH2_SWITCH_CNT == 500)
+                              {
+                                PUSH2_SWITCH_CNT = 0;
+                                PUSH2_SWITCH_FLAG = 0; 
+                                //App_PushEOpenHandle();
+                                //App_PushFOpenHandle();
+                              }
+                              #endif
+ 266   2                      App_PushEOpenHandle();
+ 267   2                      App_PushFOpenHandle();
+ 268   2                      App_SetLed(BSP_UART1_ID, LED3_VALUE);
+ 269   2              }
+ 270   1      }
+ 271          
+ 272          void Key4_Handle(INT8U id){
+ 273   1              if(id == BSP_UART0_ID){
+ 274   2                      App_PushBOpenHandle();
+ 275   2                      App_SetLed(BSP_UART0_ID, LED4_VALUE);
+ 276   2              }else{
+ 277   2                      App_PushEOpenHandle();
+ 278   2                      App_SetLed(BSP_UART1_ID, LED4_VALUE);
+ 279   2              }
+ 280   1      }
+ 281          
+ 282          void Key5_Handle(INT8U id){
+ 283   1              if(id == BSP_UART0_ID){
+ 284   2                      App_PushBCloseHandle();
+ 285   2                      App_SetLed(BSP_UART0_ID, LED5_VALUE);
+ 286   2              }else{
+ 287   2                      App_PushECloseHandle();
+ 288   2                      App_SetLed(BSP_UART1_ID, LED5_VALUE);
+ 289   2              }
+ 290   1      }
+ 291          
+ 292          void Key6_Handle(INT8U id){
+ 293   1              if(id == BSP_UART0_ID){
+ 294   2                      App_PushCOpenHandle();
+ 295   2                      App_SetLed(BSP_UART0_ID, LED6_VALUE);
+ 296   2              }else{
+ 297   2                      App_PushFOpenHandle();
+ 298   2                      App_SetLed(BSP_UART1_ID, LED6_VALUE);
+ 299   2              }
+ 300   1      }
+ 301          
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 6   
+
+ 302          void Key7_Handle(INT8U id){
+ 303   1              if(id == BSP_UART0_ID){
+ 304   2                      App_PushCCloseHandle();
+ 305   2                      App_SetLed(BSP_UART0_ID, LED7_VALUE);
+ 306   2              }else{
+ 307   2                      App_PushFCloseHandle();
+ 308   2                      App_SetLed(BSP_UART1_ID, LED7_VALUE);
+ 309   2              }
+ 310   1      }
+ 311          
+ 312          void Key8_Handle(INT8U id){
+ 313   1              App_HeatHandle(id);
+ 314   1      }
+ 315          
+ 316          void Key9_Handle(INT8U id){
+ 317   1              App_MsgeHandle(id);
+ 318   1      }
+ 319          
+ 320          void Key10_Handle(INT8U id){
+ 321   1              App_LedHandle(id);
+ 322   1      }
+ 323          
+ 324          static void App_KeyHandle(void){
+ 325   1              for(i = 0; i < 2 ;i++){
+ 326   2                      switch(App_Para.get_key[i]){
+ 327   3                              case TK1_VALUE:{
+ 328   4                                      if(App_Para.cur_key[i] != TK1_VALUE){
+ 329   5                                              App_Para.cur_key[i] = TK1_VALUE;
+ 330   5                                              Key1_Handle(i);
+ 331   5                                      }
+ 332   4                                      break;
+ 333   4                              }
+ 334   3      
+ 335   3                              case TK2_VALUE:{
+ 336   4                                      if(App_Para.cur_key[i] != TK2_VALUE){
+ 337   5                                              App_Para.cur_key[i] = TK2_VALUE;
+ 338   5                                              Key2_Handle(i);
+ 339   5                                      }
+ 340   4                                      break;
+ 341   4                              }
+ 342   3      
+ 343   3                              case TK3_VALUE:{
+ 344   4                                      if(App_Para.cur_key[i] != TK3_VALUE){
+ 345   5                                              App_Para.cur_key[i] = TK3_VALUE;
+ 346   5                                              Key3_Handle(i);
+ 347   5                                      }
+ 348   4                                      break;
+ 349   4                              }
+ 350   3      
+ 351   3                              case TK4_VALUE:{
+ 352   4                                      if(App_Para.cur_key[i] != TK4_VALUE){
+ 353   5                                              App_Para.cur_key[i] = TK4_VALUE;
+ 354   5                                              Key4_Handle(i);
+ 355   5                                      }
+ 356   4                                      break;
+ 357   4                              }
+ 358   3      
+ 359   3                              case TK5_VALUE:{
+ 360   4                                      if(App_Para.cur_key[i] != TK5_VALUE){
+ 361   5                                              App_Para.cur_key[i] = TK5_VALUE;
+ 362   5                                              Key5_Handle(i);
+ 363   5                                      }
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 7   
+
+ 364   4                                      break;
+ 365   4                              }
+ 366   3      
+ 367   3                              case TK6_VALUE:{
+ 368   4                                      if(App_Para.cur_key[i] != TK6_VALUE){
+ 369   5                                              App_Para.cur_key[i] = TK6_VALUE;
+ 370   5                                              Key6_Handle(i);
+ 371   5                                      }
+ 372   4                                      break;
+ 373   4                              }
+ 374   3      
+ 375   3                              case TK7_VALUE:{
+ 376   4                                      if(App_Para.cur_key[i] != TK7_VALUE){
+ 377   5                                              App_Para.cur_key[i] = TK7_VALUE;
+ 378   5                                              Key7_Handle(i);
+ 379   5                                      }
+ 380   4                                      break;
+ 381   4                              }
+ 382   3                              
+ 383   3                              case TK8_VALUE:{
+ 384   4                                      if(App_Para.cur_key[i] != TK8_VALUE){
+ 385   5                                              App_Para.cur_key[i] = TK8_VALUE;
+ 386   5                                              Key8_Handle(i);
+ 387   5                                      }
+ 388   4                                      break;
+ 389   4                              }
+ 390   3      
+ 391   3                              case TK9_VALUE:{
+ 392   4                                      if(App_Para.cur_key[i] != TK9_VALUE){
+ 393   5                                              App_Para.cur_key[i] = TK9_VALUE;
+ 394   5                                              Key9_Handle(i);
+ 395   5                                      }
+ 396   4                                      break;
+ 397   4                              }
+ 398   3      
+ 399   3                              case TK10_VALUE:{
+ 400   4                                      if(App_Para.cur_key[i] != TK10_VALUE){
+ 401   5                                              App_Para.cur_key[i] = TK10_VALUE;
+ 402   5                                              Key10_Handle(i);
+ 403   5                                      }
+ 404   4                                      break;
+ 405   4                              }
+ 406   3      
+ 407   3                              default:{
+ 408   4                                      if(App_Para.cur_key[i]){
+ 409   5                                              App_Para.cur_key[i] = 0;
+ 410   5                                              App_ClrLed(i, LED1_VALUE);
+ 411   5                                              App_ClrLed(i, LED2_VALUE);
+ 412   5                                              App_ClrLed(i, LED3_VALUE);
+ 413   5                                              App_ClrLed(i, LED4_VALUE);
+ 414   5                                              App_ClrLed(i, LED5_VALUE);
+ 415   5                                              App_ClrLed(i, LED6_VALUE);
+ 416   5                                              App_ClrLed(i, LED7_VALUE);
+ 417   5                                              App_Para.reset_sta[i] = False;
+ 418   5                                              if(i == BSP_UART0_ID){                                          
+ 419   6                                                      Pushrod_SetSta(&Push_Para[PUSHROD_A],PUSH_STOP);
+ 420   6                                                      Pushrod_SetSta(&Push_Para[PUSHROD_B],PUSH_STOP);
+ 421   6                                                      Pushrod_SetSta(&Push_Para[PUSHROD_C],PUSH_STOP);
+ 422   6                                              }else{
+ 423   6                                                      Pushrod_SetSta(&Push_Para[PUSHROD_D],PUSH_STOP);
+ 424   6                                                      Pushrod_SetSta(&Push_Para[PUSHROD_E],PUSH_STOP);
+ 425   6                                                      Pushrod_SetSta(&Push_Para[PUSHROD_F],PUSH_STOP);
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 8   
+
+ 426   6                                              }       
+ 427   5                                      }
+ 428   4                                      break;
+ 429   4                              }
+ 430   3                      }
+ 431   2              }
+ 432   1      }
+ 433          
+ 434          void App_Handle(void){  
+ 435   1              #ifdef SYS_ENABLE_WDT
+ 436   1                      CLEAR_WDT();
+ 437   1              #endif
+ 438   1              
+ 439   1              App_KeyHandle();
+ 440   1              
+ 441   1              for(i = 0;i < PUSHROD_NUM;i++){
+ 442   2                      Pushrod_Handle(&Push_Para[i]);
+ 443   2              }
+ 444   1      
+ 445   1              for(i = 0; i < MSGE_NUM;i++){
+ 446   2                      Msge_Handle(&Msge_Para[i]);
+ 447   2              }
+ 448   1      
+ 449   1              if(TimeOutDet_Check(&Poll_SentTime)){
+ 450   2                      TimeOut_Record(&Poll_SentTime, 50);
+ 451   2                      App_SentMsg(BSP_UART0_ID, App_Para.led_sta[0]);
+ 452   2                      App_SentMsg(BSP_UART1_ID, App_Para.led_sta[1]);
+ 453   2              }
+ 454   1      
+ 455   1              /**
+ 456   1                      @brief:auto close funciton
+ 457   1              */
+ 458   1              for(i = 0; i < 2 ;i ++){
+ 459   2                      if(App_Para.warn_auto_clscnt[i] >= WARN_AUTO_CLOSE && App_Para.warn_sta[i]){
+ 460   3                              App_Para.warn_sta[i] = OFF;
+ 461   3                              App_Para.warn_auto_clscnt[i] = 0;
+ 462   3                              App_Para.warn_auto_clsflag[i] = 0;
+ 463   3                              App_HeatSet(i, OFF);
+ 464   3                              App_ClrLed(i, LED8_VALUE);
+ 465   3                      }
+ 466   2                      if(App_Para.msge_auto_clscnt[i] >= MASS_AUTO_CLOSE && App_Para.msge_sta[i]){
+ 467   3                              App_Para.msge_sta[i] = OFF;
+ 468   3                              App_Para.msge_auto_clscnt[i] = 0;
+ 469   3                              App_Para.msge_auto_clsflag[i] = 0;
+ 470   3                              Msge_Close(&Msge_Para[i]);
+ 471   3                              App_ClrLed(i, LED9_VALUE);
+ 472   3                      }
+ 473   2              }
+ 474   1      
+ 475   1              if(App_Para.system_auto_clscnt  >= SYSTEM_AUTO_CLOSE && !App_Para.system_shutdw_flag){
+ 476   2                      App_Para.system_shutdw_flag = True;
+ 477   2                      
+ 478   2              }
+ 479   1              
+ 480   1              /**
+ 481   1                      @brief:A key reset function.
+ 482   1              */
+ 483   1              if(App_Para.reset_sta[0]){
+ 484   2                      
+ 485   2                      
+ 486   2              }
+ 487   1              
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 9   
+
+ 488   1              if(App_Para.reset_sta[1]){
+ 489   2      
+ 490   2                      
+ 491   2              }
+ 492   1      
+ 493   1              
+ 494   1      }
+ 495          
+ 496          void Timer0IqrHandle() interrupt 1{
+ 497   1              static unsigned int base_time = 0;
+ 498   1              INT8U j;
+ 499   1              TL0 = (65536 - 1600 + 200)%256;    
+ 500   1              TH0 = (65536 - 1600 + 200)/256;
+ 501   1      
+ 502   1              TimeOutDet_DecHandle();
+ 503   1              if(PUSH1_SWITCH_FLAG)
+ 504   1              {
+ 505   2                 PUSH1_SWITCH_CNT++;
+ 506   2                 if(PUSH1_SWITCH_CNT == 1000)
+ 507   2                 {
+ 508   3                    PUSH1_SWITCH_CNT_FLAG = 1; 
+ 509   3                        PUSH1_SWITCH_CNT = 0;
+ 510   3                 }
+ 511   2              }
+ 512   1              if(PUSH2_SWITCH_FLAG)
+ 513   1              {
+ 514   2                 PUSH2_SWITCH_CNT++;
+ 515   2              }
+ 516   1              
+ 517   1              for(j = 0; j < MSGE_NUM;j++){
+ 518   2                      Msge_TimeHandle(&Msge_Para[j]);
+ 519   2              }
+ 520   1      
+ 521   1              if(base_time ++ > 1000){
+ 522   2                      base_time = 0;
+ 523   2                      for(j = 0;j < 2;j ++){
+ 524   3                              if(App_Para.warn_auto_clsflag[j]){
+ 525   4                                      if(App_Para.warn_auto_clscnt[j] ++ > WARN_AUTO_CLOSE){
+ 526   5                                              App_Para.warn_auto_clsflag[j] = False;
+ 527   5                                      }
+ 528   4                              }
+ 529   3      
+ 530   3                              if(App_Para.msge_auto_clsflag[j]){
+ 531   4                                      if(App_Para.msge_auto_clscnt[j]++ > MASS_AUTO_CLOSE){
+ 532   5                                              App_Para.msge_auto_clsflag[j] = False;
+ 533   5                                      }
+ 534   4                              }
+ 535   3                      }
+ 536   2                      if(App_Para.system_auto_clsflag){
+ 537   3                              if(App_Para.system_auto_clscnt ++ > SYSTEM_AUTO_CLOSE){
+ 538   4                                      App_Para.system_auto_clsflag = False;
+ 539   4                              }
+ 540   3                      }
+ 541   2              }
+ 542   1      }
+ 543          
+ 544          void Uart0IqrHandle() interrupt 4{
+ 545   1              if(TI){
+ 546   2                      TI=0;           
+ 547   2                      if(Tx_Buf[UART_NUM0].send_cnt == Tx_Buf[UART_NUM0].len - 1){
+ 548   3                              memset((void*)&Tx_Buf[UART_NUM0],0,sizeof(Bsp_Tx_t));
+ 549   3                              P02 = 1;
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 10  
+
+ 550   3                              return ;
+ 551   3                      }       
+ 552   2                      SBUF = Tx_Buf[UART_NUM0].buf[++Tx_Buf[UART_NUM0].send_cnt];     
+ 553   2              }
+ 554   1              
+ 555   1              if(RI){
+ 556   2                      RI = 0;
+ 557   2                      App_Para.rev_buf[BSP_UART0_ID].buf[App_Para.rev_buf[BSP_UART0_ID].len ++] = SBUF;
+ 558   2                      
+ 559   2                      if(App_Para.rev_buf[BSP_UART0_ID].buf[0] != START_FIELD){
+ 560   3                              memset((void*)&App_Para.rev_buf[BSP_UART0_ID],0,sizeof(Rev_Buf_t));
+ 561   3                              App_Para.get_key[BSP_UART0_ID] = 0;
+ 562   3                              return ;
+ 563   3                      }
+ 564   2                      
+ 565   2                      if(App_Para.rev_buf[BSP_UART0_ID].len >= BSP_UART_SIZE){
+ 566   3                              if(App_Para.rev_buf[BSP_UART0_ID].buf[1] != MSG_ID){
+ 567   4                                      memset((void*)&App_Para.rev_buf[BSP_UART0_ID],0,sizeof(Rev_Buf_t));
+ 568   4                                      App_Para.get_key[BSP_UART0_ID] = 0;
+ 569   4                                      return ;
+ 570   4                              }
+ 571   3                              /*<结束符>*/
+ 572   3                              if(App_Para.rev_buf[BSP_UART0_ID].buf[BSP_UART_SIZE - 2] != 0x0d || App_Para.rev_buf[BSP_UART0_ID].buf[
+             -BSP_UART_SIZE - 1] != 0x0a){
+ 573   4                                      memset((void*)&App_Para.rev_buf[BSP_UART0_ID],0,sizeof(Rev_Buf_t));
+ 574   4                                      App_Para.get_key[0] = 0;
+ 575   4                                      return ;
+ 576   4                              }
+ 577   3                              
+ 578   3                              /*<检验CS>*/
+ 579   3                              if(App_Para.rev_buf[BSP_UART0_ID].buf[4] != (App_Para.rev_buf[BSP_UART0_ID].buf[0] + App_Para.rev_buf[B
+             -SP_UART0_ID].buf[1] + App_Para.rev_buf[BSP_UART0_ID].buf[2] + App_Para.rev_buf[BSP_UART0_ID].buf[3])){
+ 580   4                                      memset((void*)&App_Para.rev_buf[BSP_UART0_ID],0,sizeof(Rev_Buf_t));
+ 581   4                                      App_Para.get_key[0] = 0;
+ 582   4                                      return ;
+ 583   4                              }
+ 584   3                              
+ 585   3                              App_Para.get_key[BSP_UART0_ID] = (INT16U)App_Para.rev_buf[BSP_UART0_ID].buf[2] << 8 |App_Para.rev_buf[B
+             -SP_UART0_ID].buf[3];  
+ 586   3                              //App_SentMsg(BSP_UART0_ID,App_Para.get_key[BSP_UART0_ID]);
+ 587   3                              memset((void*)&App_Para.rev_buf[BSP_UART0_ID],0,sizeof(Rev_Buf_t));
+ 588   3                      }
+ 589   2              }
+ 590   1      }
+ 591          
+ 592          void Bsp_Uart1IqrHandle() interrupt 7{
+ 593   1              unsigned char crc = 0;
+ 594   1              /*<发送数据>*/
+ 595   1              if(SSCON0&0x02){
+ 596   2                      SSCON0&=0xFD;
+ 597   2                      if(Tx_Buf[UART_NUM1].send_cnt == Tx_Buf[UART_NUM1].len - 1){
+ 598   3                              memset((void*)&Tx_Buf[UART_NUM1],0,sizeof(Bsp_Tx_t));
+ 599   3                              P13 = 1;
+ 600   3                              return ;
+ 601   3                      }
+ 602   2                              
+ 603   2                      SSDAT = Tx_Buf[UART_NUM1].buf[++Tx_Buf[UART_NUM1].send_cnt];    
+ 604   2              }
+ 605   1              /*<接收数据>*/
+ 606   1              if((SSCON0&0x01)){
+ 607   2                      SSCON0&=0xFE;
+ 608   2                      App_Para.rev_buf[BSP_UART1_ID].buf[App_Para.rev_buf[BSP_UART1_ID].len++] = SSDAT;
+C51 COMPILER V9.00   APP                                                                   05/24/2018 15:04:22 PAGE 11  
+
+ 609   2                      
+ 610   2                      if(App_Para.rev_buf[BSP_UART1_ID].buf[0] != START_FIELD){
+ 611   3                              memset((void*)&App_Para.rev_buf[BSP_UART1_ID],0,sizeof(Rev_Buf_t));
+ 612   3                              App_Para.get_key[BSP_UART1_ID] = 0;
+ 613   3                              return ;
+ 614   3                      }
+ 615   2                      
+ 616   2                      if(App_Para.rev_buf[BSP_UART1_ID].len>= BSP_UART_SIZE){
+ 617   3                              /*<不是发送到本机的数据，不理会>*/
+ 618   3                              if(App_Para.rev_buf[BSP_UART1_ID].buf[1] != MESSAGE_ID){                                
+ 619   4                                      memset((void*)&App_Para.rev_buf[UART_NUM1],0,sizeof(Rev_Buf_t));
+ 620   4                                      return ;
+ 621   4                              }
+ 622   3                              /*<结尾符错误>*/
+ 623   3                              if(App_Para.rev_buf[UART_NUM1].buf[BSP_UART_SIZE-2] != 0x0d || App_Para.rev_buf[UART_NUM1].buf[BSP_UART
+             -_SIZE-1] != 0x0a){
+ 624   4                                      memset((void*)&App_Para.rev_buf[UART_NUM1],0,sizeof(Rev_Buf_t));
+ 625   4                                      return ;
+ 626   4                              }
+ 627   3                              /*<校验错误>*/
+ 628   3                              crc = (unsigned char)(App_Para.rev_buf[BSP_UART1_ID].buf[0] + App_Para.rev_buf[BSP_UART1_ID].buf[1] + A
+             -pp_Para.rev_buf[BSP_UART1_ID].buf[2] + App_Para.rev_buf[BSP_UART1_ID].buf[3]);
+ 629   3                              if(crc != App_Para.rev_buf[BSP_UART1_ID].buf[4]){
+ 630   4                                      memset((void*)&App_Para.rev_buf[UART_NUM1],0,sizeof(Rev_Buf_t));
+ 631   4                                      return ;
+ 632   4                              }
+ 633   3                              App_Para.get_key[BSP_UART1_ID] = (INT16U)App_Para.rev_buf[BSP_UART1_ID].buf[2] << 8 |App_Para.rev_buf[B
+             -SP_UART1_ID].buf[3];  
+ 634   3                              //App_SentMsg(BSP_UART1_ID,App_Para.get_key[BSP_UART1_ID]);
+ 635   3                              memset((void*)&App_Para.rev_buf[BSP_UART1_ID],0,sizeof(Rev_Buf_t));
+ 636   3                      }
+ 637   2              }
+ 638   1      }
+ 639          
+ 640          
+ 641          
+ 642          
+ 643          
+ 644          #endif
+ 645          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   3145    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     88    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     34      10
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

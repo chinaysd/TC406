@@ -1,0 +1,14 @@
+".\Objects\STARTUP.obj",
+".\Objects\app.obj",
+".\Objects\main.obj",
+".\Objects\bsp_timer.obj",
+".\Objects\TimeOut.obj",
+".\Objects\pushrod.obj",
+".\Objects\pushrod_port.obj",
+".\Objects\msge.obj",
+".\Objects\msge_port.obj",
+".\Objects\bsp_i2c_port.obj",
+".\Objects\bsp_i2c_s.obj",
+".\Objects\bsp_uart.obj" 
+TO ".\Objects\TC406_CTL" 
+PRINT(".\Listings\TC406_CTL.m51") RAMSIZE(256) 

@@ -1,0 +1,171 @@
+C51 COMPILER V9.00   BSP_I2C_S                                                             05/24/2018 15:04:24 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE BSP_I2C_S
+OBJECT MODULE PLACED IN .\Objects\bsp_i2c_s.obj
+COMPILER INVOKED BY: D:\keil\C51\BIN\C51.EXE ..\bsp\sw_i2c\bsp_i2c_s.c BROWSE INCDIR(..\pro;..\app;..\bsp;..\lib\inc;..\
+                    -bsp\pushrod;..\bsp\message;..\bsp\sw_i2c) DEBUG OBJECTEXTEND PRINT(.\Listings\bsp_i2c_s.lst) OBJECT(.\Objects\bsp_i2c_s.
+                    -obj)
+
+line level    source
+
+   1          #include "bsp_i2c_s.h"
+   2          
+   3          extern int IIC_Port_Write(int ID,int Func,int Data);
+   4          extern int IIC_Port_Read(int ID ,int Func );
+   5          extern int IIC_Port_SDA_Set(int ID,int Func);
+   6          
+   7          static void IIC_Delay_us(unsigned int Delay){
+   8   1              unsigned char  j;
+   9   1              while( Delay--){        
+  10   2                      for(j = IIC_DelayBaseValue;j > 0;j --);
+  11   2              }
+  12   1      }
+  13          
+  14          int IIC_Init(IIC_PARA_t *p){
+  15   1              extern int IIC_Port_Init(int ID);
+  16   1              return IIC_Port_Init(p->ID);
+  17   1      }
+  18          
+  19          static void IIC_Start(IIC_PARA_t *p){
+  20   1              IIC_Port_Write(p->ID, IIC_SDA, 1);
+  21   1              IIC_Delay_us(IIC_DelayTime);
+  22   1              IIC_Port_Write(p->ID, IIC_SCL, 1);
+  23   1              IIC_Delay_us(IIC_DelayTime);
+  24   1              IIC_Port_Write(p->ID, IIC_SDA, 0);
+  25   1              IIC_Delay_us(IIC_DelayTime);
+  26   1              IIC_Port_Write(p->ID, IIC_SCL, 0);
+  27   1              IIC_Delay_us(IIC_DelayTime);
+  28   1      }
+  29          
+  30          static int  IIC_WriteData(IIC_PARA_t *p,unsigned char Data){
+  31   1              unsigned char i,AckStatus;
+  32   1              for(i = 0;i < 8;i ++){
+  33   2                      if(Data & 0x80){
+  34   3                              IIC_Port_Write(p->ID, IIC_SDA, 1);
+  35   3                      }else{
+  36   3                              IIC_Port_Write(p->ID, IIC_SDA, 0);
+  37   3                      }
+  38   2                      Data <<= 1;
+  39   2                      IIC_Delay_us(IIC_DelayTime);
+  40   2                      IIC_Port_Write(p->ID, IIC_SCL, 1);
+  41   2                      IIC_Delay_us(IIC_DelayTime);
+  42   2                      IIC_Port_Write(p->ID, IIC_SCL, 0);
+  43   2                      IIC_Delay_us(IIC_DelayTime);  
+  44   2              }   
+  45   1              IIC_Port_SDA_Set(p->ID, IN);
+  46   1              IIC_Port_Write(p->ID, IIC_SCL, 1);               
+  47   1              IIC_Delay_us(IIC_DelayTime);
+  48   1              
+  49   1              if(IIC_Port_Read(p->ID,IIC_SDA)){  
+  50   2                      AckStatus = 0;
+  51   2                      
+  52   2              }else{
+  53   2                      AckStatus = 1;
+C51 COMPILER V9.00   BSP_I2C_S                                                             05/24/2018 15:04:24 PAGE 2   
+
+  54   2              }
+  55   1              IIC_Port_Write(p->ID, IIC_SCL, 0);
+  56   1              IIC_Delay_us(IIC_DelayTime);  
+  57   1              IIC_Port_SDA_Set(p->ID, OUT);
+  58   1              return AckStatus;
+  59   1      }
+  60          
+  61          static void IIC_Stop(IIC_PARA_t *p){
+  62   1              IIC_Port_Write(p->ID, IIC_SCL, 0);
+  63   1              IIC_Delay_us(IIC_DelayTime);
+  64   1              IIC_Port_Write(p->ID, IIC_SCL, 1);
+  65   1              IIC_Delay_us(IIC_DelayTime);
+  66   1              IIC_Port_Write(p->ID, IIC_SDA, 1);
+  67   1              IIC_Delay_us(IIC_DelayTime);
+  68   1              IIC_Delay_us(1000);
+  69   1      }
+  70          
+  71          static void IIC_Nck(IIC_PARA_t *p){
+  72   1              IIC_Port_Write(p->ID, IIC_SDA, 1);
+  73   1              IIC_Delay_us(IIC_DelayTime);
+  74   1              IIC_Port_Write(p->ID, IIC_SCL, 1);
+  75   1              IIC_Delay_us(IIC_DelayTime);
+  76   1              IIC_Port_Write(p->ID, IIC_SCL, 0);
+  77   1              IIC_Delay_us(IIC_DelayTime);
+  78   1              IIC_Port_Write(p->ID, IIC_SDA, 0);
+  79   1              IIC_Delay_us(IIC_DelayTime);
+  80   1      }
+  81          
+  82          static void I2C_Ack(IIC_PARA_t *p){
+  83   1              IIC_Port_Write(p->ID, IIC_SCL, 0);
+  84   1              IIC_Delay_us(IIC_DelayTime);
+  85   1              IIC_Port_Write(p->ID, IIC_SDA, 0);
+  86   1              IIC_Delay_us(IIC_DelayTime);
+  87   1              IIC_Port_Write(p->ID, IIC_SCL, 1);
+  88   1              IIC_Delay_us(IIC_DelayTime);
+  89   1              IIC_Port_Write(p->ID, IIC_SCL, 0);
+  90   1              IIC_Delay_us(IIC_DelayTime);
+  91   1      }
+  92          
+  93          static unsigned char IIC_ReadData(IIC_PARA_t *p){
+  94   1              unsigned char Read = 0,j;
+  95   1              IIC_Port_SDA_Set(p->ID, IN);
+  96   1              IIC_Delay_us(IIC_DelayTime);
+  97   1              for(j = 0;j < 8;j ++){
+  98   2                      IIC_Port_Write(p->ID, IIC_SCL, 1);
+  99   2                      IIC_Delay_us(IIC_DelayTime);
+ 100   2                      if(IIC_Port_Read(p->ID,IIC_SDA)){
+ 101   3                               Read = Read |(0x80 >> j);
+ 102   3                      }
+ 103   2                      IIC_Port_Write(p->ID, IIC_SCL, 0);
+ 104   2                      IIC_Delay_us(IIC_DelayTime);
+ 105   2              }
+ 106   1              IIC_Port_SDA_Set(p->ID, OUT);
+ 107   1              return Read;
+ 108   1      }
+ 109          
+ 110          int  IIC_Read_Data(IIC_PARA_t *p,unsigned char Add,unsigned char *Read_Data,unsigned int Len){
+ 111   1              while(Len --){
+ 112   2                      IIC_Start(p);
+ 113   2                      if(IIC_WriteData(p, Add) == 0){
+ 114   3                              IIC_Stop(p);
+ 115   3                              return 0;
+C51 COMPILER V9.00   BSP_I2C_S                                                             05/24/2018 15:04:24 PAGE 3   
+
+ 116   3                      }
+ 117   2                      *Read_Data++ = IIC_ReadData(p);
+ 118   2                      IIC_Nck(p);
+ 119   2                      IIC_Stop(p);
+ 120   2              }
+ 121   1              return 1;
+ 122   1      }
+ 123          
+ 124          int  IIC_Write_Data(IIC_PARA_t *p,unsigned char Add,unsigned char *Write_Data,unsigned int Len){
+ 125   1              while(Len --){
+ 126   2                      IIC_Start(p);
+ 127   2                      if(!IIC_WriteData(p, Add)){
+ 128   3                              IIC_Stop(p);
+ 129   3                              return 0;
+ 130   3                      }
+ 131   2                      if(!IIC_WriteData(p, *Write_Data++)){
+ 132   3                              IIC_Stop(p);
+ 133   3                              return 0;
+ 134   3                      }
+ 135   2                      IIC_Nck(p);
+ 136   2                      IIC_Stop(p);
+ 137   2              }
+ 138   1              return 1;
+ 139   1      }
+ 140          
+ 141          
+ 142          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1077    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      41
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
